@@ -1,4 +1,5 @@
 use std::process::exit;
+use std::sync::Arc;
 use async_std;
 use futures::try_join;
 use log::{
@@ -14,7 +15,7 @@ use smol::{
         Sender,
     },
 };
-use std::sync::Arc;
+use structopt::StructOpt;
 use pcap_async::{
     Config,
     Handle,
@@ -31,6 +32,22 @@ use dns_metrics::{
     tracking::RequestTracker,
     metrics::Metrics,
 };
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "basic")]
+struct Options {
+    #[structopt(short, long, default_value = "0.0.0.0")]
+    address: String,
+
+    #[structopt(short, long, default_value = "8080")]
+    port: u16,
+
+    #[structopt(short, long)]
+    interface: Option<String>,
+
+    #[structopt(short, long, default_value = "5000")]
+    buffer_size: u16,
+}
 
 async fn collect_metrics(request: tide::Request<Registry>) -> tide::Result<String> {
     let registry = request.state();
@@ -60,14 +77,18 @@ async fn packet_loop(
     Ok(())
 }
 
-#[async_std::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    SimpleLogger::new()
-        .with_level(LevelFilter::Off)
-        .with_module_level("dns_metrics", LevelFilter::Info)
-        .init()
-        .unwrap();
-    let handle = Handle::lookup().expect("No handle created");
+fn construct_packet_handle(interface: &Option<String>) -> (Arc<Handle>, PacketStream) {
+    let handle = match interface {
+        Some(interface) => Handle::live_capture(&interface),
+        None => Handle::lookup(),
+    };
+    let handle = match handle {
+        Ok(handle) => handle,
+        Err(error) => {
+            error!("Failed to create capture handle: {}", error);
+            exit(1);
+        }
+    };
     let mut config = Config::default();
     config.with_bpf("udp port 53".into());
     let packet_stream = match PacketStream::new(config, Arc::clone(&handle)) {
@@ -77,19 +98,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             exit(1);
         },
     };
+    (handle, packet_stream)
+}
+
+#[async_std::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    SimpleLogger::new()
+        .with_level(LevelFilter::Off)
+        .with_module_level("dns_metrics", LevelFilter::Info)
+        .init()
+        .unwrap();
+
+    let options = Options::from_args();
+    let metrics_endpoint = format!("{}:{}", options.address, options.port);
+    let (handle, packet_stream) = construct_packet_handle(&options.interface);
 
     let mut registry = Registry::default();
     let metrics = Metrics::new(&mut registry);
-    let (sender, receiver) = channel::bounded(5000);
+    let (sender, receiver) = channel::bounded(options.buffer_size as usize);
     let processor = PacketProcessor::new(receiver, RequestTracker::default(), metrics);
-    let mut app = tide::with_state(registry);
-    app.at("/metrics").get(collect_metrics);
+    let mut web_app = tide::with_state(registry);
+    web_app.at("/metrics").get(collect_metrics);
 
     let processor_task = smol::spawn(async move {
         processor.run().await
     });
     let exposer_task = smol::spawn(async move {
-        match app.listen("127.0.0.1:8080").await {
+        match web_app.listen(metrics_endpoint).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("Error starting HTTP server: {}", e);
