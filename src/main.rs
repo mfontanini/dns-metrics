@@ -7,9 +7,11 @@ use smol::prelude::*;
 use smol::channel;
 use std::sync::Arc;
 use pcap_async::{Config, Handle, PacketStream};
+use prometheus::Registry;
 use dns_metrics::{
     processing::PacketProcessor,
     tracking::RequestTracker,
+    metrics::Metrics,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,7 +24,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::default();
     config.with_bpf("udp port 53".into());
     let (sender, receiver) = channel::bounded(5000);
-    let processor = PacketProcessor::new(receiver, RequestTracker::default());
+    let mut registry = Registry::default();
+    let metrics = Metrics::new(&mut registry);
+    let processor = PacketProcessor::new(receiver, RequestTracker::default(), metrics);
     smol::spawn(async move {
         processor.run().await
     }).detach();

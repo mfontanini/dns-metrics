@@ -9,10 +9,12 @@ use crate::{
     dns::{
         DnsAnswer,
         DnsBody,
+        DnsQuery,
     },
     packet::Packet,
+    tracking::RequestTracker,
+    metrics::Metrics,
 };
-use crate::tracking::RequestTracker;
 
 pub struct PacketProcessor<T>
 where
@@ -20,16 +22,18 @@ where
 {
     raw_packet_stream: T,
     tracker: RequestTracker,
+    metrics: Metrics,
 }
 
 impl<T> PacketProcessor<T>
 where
     T: Stream<Item = RawPacket> + Unpin
 {
-    pub fn new(raw_packet_stream: T, tracker: RequestTracker) -> Self {
+    pub fn new(raw_packet_stream: T, tracker: RequestTracker, metrics: Metrics) -> Self {
         Self {
             raw_packet_stream,
             tracker,
+            metrics,
         }
     }
 
@@ -54,7 +58,10 @@ where
         let id = packet.id();
         let body = packet.body();
         match body {
-            DnsBody::Query(query) => self.tracker.add_query(id, query),
+            DnsBody::Query(query) => {
+                self.emit_query_metrics(&query);
+                self.tracker.add_query(id, query);
+            },
             DnsBody::Answer(answer) => {
                 let original_query = self.tracker.match_answer(&id);
                 match original_query {
@@ -65,9 +72,16 @@ where
         }
     }
 
+    fn emit_query_metrics(&mut self, query: &DnsQuery) {
+        self.metrics.record_query();
+        for question in &query.questions {
+            self.metrics.record_question(&question.query_type, &question.query_class);
+        }
+    }
+
     fn emit_answer_metrics(&mut self, query_timestamp: &SystemTime, answer: DnsAnswer) {
         match answer.timestamp.duration_since(*query_timestamp) {
-            Ok(elapsed) => println!("Query latency {:?}", elapsed),
+            Ok(elapsed) => self.metrics.observe_query_latency(&elapsed),
             Err(_) => warn!("Answer came before request (clock drift?)"),
         };
     }
