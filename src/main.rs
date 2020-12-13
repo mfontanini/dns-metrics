@@ -42,11 +42,11 @@ struct Options {
     #[structopt(short, long, default_value = "8080")]
     port: u16,
 
-    #[structopt(short, long)]
-    interface: Option<String>,
-
     #[structopt(short, long, default_value = "5000")]
     buffer_size: u16,
+
+    #[structopt(name = "interface")]
+    interface: String,
 }
 
 async fn collect_metrics(request: tide::Request<Registry>) -> tide::Result<String> {
@@ -77,12 +77,8 @@ async fn packet_loop(
     Ok(())
 }
 
-fn construct_packet_handle(interface: &Option<String>) -> (Arc<Handle>, PacketStream) {
-    let handle = match interface {
-        Some(interface) => Handle::live_capture(&interface),
-        None => Handle::lookup(),
-    };
-    let handle = match handle {
+fn construct_packet_handle(interface: &String) -> (Arc<Handle>, PacketStream) {
+    let handle = match Handle::live_capture(interface) {
         Ok(handle) => handle,
         Err(error) => {
             error!("Failed to create capture handle: {}", error);
