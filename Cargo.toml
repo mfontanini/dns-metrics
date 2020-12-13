@@ -1,0 +1,15 @@
+[package]
+name = "dns-metrics"
+version = "0.1.0"
+authors = ["Matias Fontanini <matias.fontanini@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+dns-parser = "^0.8"
+etherparse = "^0.9"
+log = "^0.4"
+futures = "^0.3"
+pcap-async = "^0.4"
+smol = "^1.2"
+thiserror ="^1.0"
+simple_logger = "^1.11"
