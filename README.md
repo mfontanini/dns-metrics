@@ -3,6 +3,7 @@
 A [Rust](https://www.rust-lang.org/) toy project to capture DNS packets and emit various metrics based on them:
 
 * Number of queries
+* Number of timed out queries
 * Number of records queried by record type and class
 * Query latency
 
@@ -62,6 +63,9 @@ query_latency_seconds_bucket{le="10"} 219
 query_latency_seconds_bucket{le="+Inf"} 219
 query_latency_seconds_sum 11.573999999999995
 query_latency_seconds_count 219
+# HELP query_timeouts_total Number of queries that timed out
+# TYPE query_timeouts_total counter
+query_timeouts_total 0
 # HELP questions_total Number of questions per type/class
 # TYPE questions_total counter
 questions_total{class="IN",type="A"} 200
@@ -69,9 +73,3 @@ questions_total{class="IN",type="AAAA"} 18
 questions_total{class="IN",type="MX"} 1
 
 ```
-
-## Caveat
-
-This is using a `HashMap` to keep DNS queries made and nothing is cleaning up timed out requests from it. As a side
-effect, this will eventually blow up in any environment given DNS query timeouts are bound to happen everywhere.
-This would also blow up a lot faster if someone was purposely sending DNS queries which would never be answered

@@ -1,6 +1,8 @@
 use std::process::exit;
 use std::sync::Arc;
+use std::time::Duration;
 use async_std;
+use async_std::task::sleep;
 use futures::try_join;
 use log::{
     error,
@@ -44,6 +46,10 @@ struct Options {
 
     #[structopt(short, long, default_value = "5000")]
     buffer_size: u16,
+
+    /// The number of seconds to wait until a non answered DNS query is considered to be timed out
+    #[structopt(short, long, default_value = "10")]
+    timeout: u16,
 
     #[structopt(name = "interface")]
     interface: String,
@@ -97,6 +103,14 @@ fn construct_packet_handle(interface: &String) -> (Arc<Handle>, PacketStream) {
     (handle, packet_stream)
 }
 
+async fn entry_expiration_loop(request_tracker: RequestTracker, metrics: Metrics) {
+    loop {
+        sleep(Duration::from_secs(10)).await;
+        let timed_out_requests = request_tracker.expire_requests();
+        metrics.record_query_timeouts(timed_out_requests as u64);
+    }
+}
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     SimpleLogger::new()
@@ -112,7 +126,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registry = Registry::default();
     let metrics = Metrics::new(&mut registry);
     let (sender, receiver) = channel::bounded(options.buffer_size as usize);
-    let processor = PacketProcessor::new(receiver, RequestTracker::default(), metrics);
+    let request_tracker = RequestTracker::with_expiration(Duration::from_secs(options.timeout as u64));
+    let processor = PacketProcessor::new(receiver, request_tracker.clone(), metrics.clone());
     let mut web_app = tide::with_state(registry);
     web_app.at("/metrics").get(collect_metrics);
 
@@ -139,7 +154,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    if let Err(_) = try_join!(processor_task, exposer_task, packet_sniffer_task) {
+    let expire_requests_task = smol::spawn(async move {
+        entry_expiration_loop(request_tracker, metrics).await;
+        Ok(())
+    });
+    if let Err(_) = try_join!(processor_task, exposer_task, packet_sniffer_task, expire_requests_task) {
         error!("Error encountered, shutting down");
     }
     Ok(())

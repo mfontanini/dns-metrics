@@ -12,15 +12,19 @@ use prometheus::{
     Opts,
 };
 
+#[derive(Clone)]
 pub struct Metrics {
     queries_counter: IntCounter,
+    query_timeouts_counter: IntCounter,
     questions_counter: IntCounterVec,
     query_latencies: Histogram,
 }
 
 impl Metrics {
     pub fn new(registry: &mut Registry) -> Self {
-        let queries_counter = IntCounter::new("queries_total", "Number of queries made",).unwrap();
+        let queries_counter = IntCounter::new("queries_total", "Number of queries made").unwrap();
+        let query_timeouts_counter =
+            IntCounter::new("query_timeouts_total", "Number of queries that timed out").unwrap();
         let questions_counter = IntCounterVec::new(
             Opts::new("questions_total", "Number of questions per type/class"),
             &["type", "class"],
@@ -30,6 +34,7 @@ impl Metrics {
         let query_latencies = Histogram::with_opts(query_latencies_opts).unwrap();
         let output = Self {
             queries_counter,
+            query_timeouts_counter,
             questions_counter,
             query_latencies,
         };
@@ -39,12 +44,17 @@ impl Metrics {
 
     fn register(&self, registry: &mut Registry) {
         registry.register(Box::new(self.queries_counter.clone())).unwrap();
+        registry.register(Box::new(self.query_timeouts_counter.clone())).unwrap();
         registry.register(Box::new(self.questions_counter.clone())).unwrap();
         registry.register(Box::new(self.query_latencies.clone())).unwrap();
     }
 
     pub fn record_query(&self) {
         self.queries_counter.inc();
+    }
+
+    pub fn record_query_timeouts(&self, timeouts: u64) {
+        self.query_timeouts_counter.inc_by(timeouts);
     }
 
     pub fn record_question(&self, query_type: &QueryType, query_class: &QueryClass) {

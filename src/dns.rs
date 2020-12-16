@@ -9,7 +9,7 @@ use dns_parser::{
 
 type Endpoint = (IpAddr, u16);
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct DnsRequestId {
     lower_endpoint: Endpoint,
     upper_endpoint: Endpoint,
