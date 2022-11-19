@@ -1,24 +1,17 @@
-use std::time::SystemTime;
-use log::{
-    debug,
-    warn,
-};
-use smol::prelude::*;
-use pcap_async::Packet as RawPacket;
 use crate::{
-    dns::{
-        DnsAnswer,
-        DnsBody,
-        DnsQuery,
-    },
+    dns::{DnsAnswer, DnsBody, DnsQuery},
+    metrics::Metrics,
     packet::Packet,
     tracking::RequestTracker,
-    metrics::Metrics,
 };
+use log::{debug, warn};
+use pcap_async::Packet as RawPacket;
+use smol::prelude::*;
+use std::time::SystemTime;
 
 pub struct PacketProcessor<T>
 where
-    T: Stream<Item = RawPacket>
+    T: Stream<Item = RawPacket>,
 {
     raw_packet_stream: T,
     tracker: RequestTracker,
@@ -27,7 +20,7 @@ where
 
 impl<T> PacketProcessor<T>
 where
-    T: Stream<Item = RawPacket> + Unpin
+    T: Stream<Item = RawPacket> + Unpin,
 {
     pub fn new(raw_packet_stream: T, tracker: RequestTracker, metrics: Metrics) -> Self {
         Self {
@@ -46,7 +39,7 @@ where
                 Err(e) => {
                     debug!("Invalid packet found: {:?}", e);
                     continue;
-                },
+                }
             };
             self.process_packet(packet);
         }
@@ -61,12 +54,11 @@ where
             DnsBody::Query(query) => {
                 self.emit_query_metrics(&query);
                 self.tracker.add_query(id, query);
-            },
+            }
             DnsBody::Answer(answer) => {
                 let original_query = self.tracker.match_answer(&id);
-                match original_query {
-                    Some(query) => self.emit_answer_metrics(&query.timestamp, answer),
-                    None => (),
+                if let Some(query) = original_query {
+                    self.emit_answer_metrics(&query.timestamp, answer);
                 }
             }
         }
@@ -75,7 +67,8 @@ where
     fn emit_query_metrics(&mut self, query: &DnsQuery) {
         self.metrics.record_query();
         for question in &query.questions {
-            self.metrics.record_question(&question.query_type, &question.query_class);
+            self.metrics
+                .record_question(&question.query_type, &question.query_class);
         }
     }
 

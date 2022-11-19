@@ -1,4 +1,3 @@
-use async_std;
 use async_std::task::sleep;
 use dns_metrics::{metrics::Metrics, processing::PacketProcessor, tracking::RequestTracker};
 use futures::try_join;
@@ -49,7 +48,7 @@ async fn packet_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     while let Some(packets) = packet_stream.next().await {
         for packet in packets? {
-            if let Err(_) = sender.try_send(packet) {
+            if sender.try_send(packet).is_err() {
                 warn!("Buffer is full, dropping packet");
             };
         }
@@ -57,7 +56,7 @@ async fn packet_loop(
     Ok(())
 }
 
-fn construct_packet_handle(interface: &String) -> (Arc<Handle>, PacketStream) {
+fn construct_packet_handle(interface: &str) -> (Arc<Handle>, PacketStream) {
     let handle = match Handle::live_capture(interface) {
         Ok(handle) => handle,
         Err(error) => {
@@ -131,12 +130,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         entry_expiration_loop(request_tracker, metrics).await;
         Ok(())
     });
-    if let Err(_) = try_join!(
+    let result = try_join!(
         processor_task,
         exposer_task,
         packet_sniffer_task,
         expire_requests_task
-    ) {
+    );
+    if result.is_err() {
         error!("Error encountered, shutting down");
     }
     Ok(())

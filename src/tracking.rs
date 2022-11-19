@@ -1,20 +1,8 @@
+use crate::dns::{DnsQuery, DnsRequestId};
 use std::cmp::Ordering;
-use std::sync::{
-    Arc,
-    Mutex,
-};
-use std::time::{
-    Duration,
-    SystemTime,
-};
-use std::collections::{
-    BTreeMap,
-    HashMap,
-};
-use crate::dns::{
-    DnsQuery,
-    DnsRequestId,
-};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 struct IdentifiedQuery {
     query: DnsQuery,
@@ -47,7 +35,7 @@ pub struct RequestTracker {
 impl RequestTracker {
     pub fn with_expiration(expiration: Duration) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Inner{
+            inner: Arc::new(Mutex::new(Inner {
                 outstanding_requests: HashMap::new(),
                 identifier_ttls: BTreeMap::new(),
                 current_id: 0,
@@ -67,7 +55,9 @@ impl RequestTracker {
             query,
             id: current_id,
         };
-        inner.identifier_ttls.insert(current_id, expireable_identifier);
+        inner
+            .identifier_ttls
+            .insert(current_id, expireable_identifier);
         inner.current_id += 1;
         inner.outstanding_requests.insert(id, wrapper);
     }
@@ -78,7 +68,7 @@ impl RequestTracker {
             Some(identified_query) => {
                 inner.identifier_ttls.remove(&identified_query.id);
                 Some(identified_query.query)
-            },
+            }
             None => None,
         }
     }
@@ -93,8 +83,6 @@ impl RequestTracker {
                 break;
             }
             let id = *head.0;
-            // Note: this can be simplified once https://github.com/rust-lang/rust/issues/62924 is stabilized
-            drop(head);
             let request_id = inner.identifier_ttls.remove(&id).unwrap().request_id;
             inner.outstanding_requests.remove(&request_id);
             inner.identifier_ttls.remove(&id);

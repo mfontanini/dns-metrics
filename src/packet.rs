@@ -1,22 +1,11 @@
+use crate::dns::{
+    DnsAnswer, DnsBody, DnsQuery, DnsRequestId, Question, ResourceData, ResourceRecord,
+};
+use dns_parser::Packet as DnsPacket;
+use etherparse::{InternetSlice, SlicedPacket, TransportSlice, UdpHeaderSlice};
 use std::net::IpAddr;
 use std::time::SystemTime;
 use thiserror::Error;
-use dns_parser::Packet as DnsPacket;
-use etherparse::{
-    InternetSlice,
-    SlicedPacket,
-    TransportSlice,
-    UdpHeaderSlice,
-};
-use crate::dns::{
-    DnsAnswer,
-    DnsBody,
-    DnsQuery,
-    DnsRequestId,
-    Question,
-    ResourceData,
-    ResourceRecord,
-};
 
 pub struct Packet<'a> {
     ip: InternetSlice<'a>,
@@ -48,8 +37,14 @@ impl<'a> Packet<'a> {
 
     pub fn id(&self) -> DnsRequestId {
         let (source_address, target_address) = match &self.ip {
-            InternetSlice::Ipv4(slice) => (IpAddr::V4(slice.source_addr()), IpAddr::V4(slice.destination_addr())),
-            InternetSlice::Ipv6(slice, _) => (IpAddr::V6(slice.source_addr()), IpAddr::V6(slice.destination_addr())),
+            InternetSlice::Ipv4(slice) => (
+                IpAddr::V4(slice.source_addr()),
+                IpAddr::V4(slice.destination_addr()),
+            ),
+            InternetSlice::Ipv6(slice, _) => (
+                IpAddr::V6(slice.source_addr()),
+                IpAddr::V6(slice.destination_addr()),
+            ),
         };
         DnsRequestId::new(
             source_address,
@@ -64,12 +59,18 @@ impl<'a> Packet<'a> {
         match self.dns.header.query {
             true => {
                 let questions = self.dns.questions.iter().map(Question::from).collect();
-                DnsBody::Query(DnsQuery{ questions, timestamp: self.timestamp.clone() })
-            },
+                DnsBody::Query(DnsQuery {
+                    questions,
+                    timestamp: self.timestamp,
+                })
+            }
             false => {
                 let records = self.dns.answers.iter().map(ResourceRecord::from).collect();
-                DnsBody::Answer(DnsAnswer{ records, timestamp: self.timestamp.clone() })
-            },
+                DnsBody::Answer(DnsAnswer {
+                    records,
+                    timestamp: self.timestamp,
+                })
+            }
         }
     }
 }

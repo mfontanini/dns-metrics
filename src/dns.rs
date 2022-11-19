@@ -1,11 +1,7 @@
+use dns_parser::{Class, QueryClass, QueryType};
 use std::cmp::Ordering;
 use std::net::IpAddr;
 use std::time::SystemTime;
-use dns_parser::{
-    Class,
-    QueryClass,
-    QueryType,
-};
 
 type Endpoint = (IpAddr, u16);
 
@@ -23,8 +19,7 @@ impl DnsRequestId {
         target_address: IpAddr,
         target_port: u16,
         request_id: u16,
-    ) -> Self
-    {
+    ) -> Self {
         let (lower_endpoint, upper_endpoint) = match source_address.cmp(&target_address) {
             Ordering::Less => ((source_address, source_port), (target_address, target_port)),
             _ => ((target_address, target_port), (source_address, source_port)),
