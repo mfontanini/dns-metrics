@@ -1,39 +1,18 @@
+use async_std;
+use async_std::task::sleep;
+use dns_metrics::{metrics::Metrics, processing::PacketProcessor, tracking::RequestTracker};
+use futures::try_join;
+use log::{error, warn, LevelFilter};
+use pcap_async::{Config, Handle, Packet, PacketStream};
+use prometheus::{Registry, TextEncoder};
+use simple_logger::SimpleLogger;
+use smol::channel::{self, Sender};
+use smol::prelude::*;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
-use async_std;
-use async_std::task::sleep;
-use futures::try_join;
-use log::{
-    error,
-    warn,
-    LevelFilter,
-};
-use simple_logger::SimpleLogger;
-use smol::prelude::*;
-use smol::{
-    channel::{
-        self,
-        Sender,
-    },
-};
 use structopt::StructOpt;
-use pcap_async::{
-    Config,
-    Handle,
-    Packet,
-    PacketStream,
-};
-use prometheus::{
-    Encoder,
-    Registry,
-    TextEncoder,
-};
-use dns_metrics::{
-    processing::PacketProcessor,
-    tracking::RequestTracker,
-    metrics::Metrics,
-};
+use tide::StatusCode;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
@@ -57,22 +36,17 @@ struct Options {
 
 async fn collect_metrics(request: tide::Request<Registry>) -> tide::Result<String> {
     let registry = request.state();
-    let mut buffer = Vec::new();
+    let metrics = registry.gather();
     let encoder = TextEncoder::new();
-    let metric_familys = registry.gather();
-    for mf in metric_familys {
-        if let Err(e) = encoder.encode(&[mf], &mut buffer) {
-            warn!("Ignoring prometheus encoding error: {:?}", e);
-        }
-    }
-    Ok(String::from_utf8(buffer.clone()).unwrap())
+    encoder
+        .encode_to_string(&metrics)
+        .map_err(|e| tide::Error::new(StatusCode::InternalServerError, e))
 }
 
 async fn packet_loop(
     mut packet_stream: PacketStream,
-    sender: Sender<Packet>
-) -> Result<(), Box<dyn std::error::Error>>
-{
+    sender: Sender<Packet>,
+) -> Result<(), Box<dyn std::error::Error>> {
     while let Some(packets) = packet_stream.next().await {
         for packet in packets? {
             if let Err(_) = sender.try_send(packet) {
@@ -98,7 +72,7 @@ fn construct_packet_handle(interface: &String) -> (Arc<Handle>, PacketStream) {
         Err(error) => {
             error!("Could not start packet capture: {}", error);
             exit(1);
-        },
+        }
     };
     (handle, packet_stream)
 }
@@ -126,14 +100,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registry = Registry::default();
     let metrics = Metrics::new(&mut registry);
     let (sender, receiver) = channel::bounded(options.buffer_size as usize);
-    let request_tracker = RequestTracker::with_expiration(Duration::from_secs(options.timeout as u64));
+    let request_tracker =
+        RequestTracker::with_expiration(Duration::from_secs(options.timeout as u64));
     let processor = PacketProcessor::new(receiver, request_tracker.clone(), metrics.clone());
     let mut web_app = tide::with_state(registry);
     web_app.at("/metrics").get(collect_metrics);
 
-    let processor_task = smol::spawn(async move {
-        processor.run().await
-    });
+    let processor_task = smol::spawn(async move { processor.run().await });
     let exposer_task = smol::spawn(async move {
         match web_app.listen(metrics_endpoint).await {
             Ok(_) => Ok(()),
@@ -158,7 +131,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         entry_expiration_loop(request_tracker, metrics).await;
         Ok(())
     });
-    if let Err(_) = try_join!(processor_task, exposer_task, packet_sniffer_task, expire_requests_task) {
+    if let Err(_) = try_join!(
+        processor_task,
+        exposer_task,
+        packet_sniffer_task,
+        expire_requests_task
+    ) {
         error!("Error encountered, shutting down");
     }
     Ok(())
